@@ -7,10 +7,11 @@ import psutil
 from db import init_db, save_to_db
 from idle import get_idle_seconds
 from server import run_server, get_browser_status
-
+from lock_status import is_screen_locked
 
 IDLE_THRESHOLD = 60 # секунды простоя после которых не считаем время
 BROWSER_PROCESSES = ("chrome.exe", "msedge.exe")
+LOCK_SCREEN_PROCESSES = ("LockApp.exe",)
 
 def getActiveWindowProcessName():
     try:
@@ -36,8 +37,21 @@ def main():
 
     try:
         while True:
-            idle_seconds = get_idle_seconds()
             app_name = getActiveWindowProcessName()
+            locked = is_screen_locked() or app_name in LOCK_SCREEN_PROCESSES
+
+            if locked:
+                print("[экран заблокирован] время не считается")
+                time.sleep(check_interval)
+                seconds_since_save += check_interval
+                if seconds_since_save >= save_interval:
+                    save_to_db(time_per_app)
+                    print(f"[сохранено в базу] {time_per_app}")
+                    time_per_app = {}
+                    seconds_since_save = 0
+                continue
+
+            idle_seconds = get_idle_seconds()
 
             domain, audible = (None, False)
             if app_name in BROWSER_PROCESSES:

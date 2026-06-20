@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Time Tracker - Вкладки",
+  "version": "1.0",
+  "description": "Отправляет адрес активной вкладки локальному трекеру",
+  "permissions": ["tabs"],
+  "host_permissions": ["http://localhost:5500/*"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

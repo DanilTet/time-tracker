@@ -1,12 +1,16 @@
 import time
+import threading
 import win32gui
 import win32process
 import psutil
 
 from db import init_db, save_to_db
 from idle import get_idle_seconds
+from server import run_server, get_browser_status
+
 
 IDLE_THRESHOLD = 60 # секунды простоя после которых не считаем время
+BROWSER_PROCESSES = ("chrome.exe", "msedge.exe")
 
 def getActiveWindowProcessName():
     try:
@@ -19,20 +23,39 @@ def getActiveWindowProcessName():
     
 def main():
     init_db() 
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
     print("Трекер запущен. Ctrl+C чтобі остановить и увидеть итоги.")
 
     time_per_app = {}
     check_interval = 1   # как часто проверяем активное окно в секундах
     save_interval = 10  # как часто пишем в базу в секундах
     seconds_since_save = 0
-    
+
     try:
         while True:
             idle_seconds = get_idle_seconds()
+            app_name = getActiveWindowProcessName()
 
-            if idle_seconds < IDLE_THRESHOLD:
-                app_name = getActiveWindowProcessName()
-                time_per_app[app_name] = time_per_app.get(app_name, 0) + check_interval
+            domain, audible = (None, False)
+            if app_name in BROWSER_PROCESSES:
+                domain, audible = get_browser_status()
+
+            # либо были недавние мышь/клава, либо играет звук в браузере
+            user_present = (idle_seconds < IDLE_THRESHOLD) or audible
+
+            if user_present:
+                if app_name in BROWSER_PROCESSES and domain:
+                    activity_name = domain # считаем сайт
+                else:
+                    activity_name = app_name # обычная программа
+
+                time_per_app[activity_name] = time_per_app.get(activity_name, 0) + check_interval
+
+                if audible and idle_seconds >= IDLE_THRESHOLD:
+                    print(f"[звук играет, не простой] {activity_name}")
             else:
                 print(f"[простой {int(idle_seconds)} сек] время не считается")
 

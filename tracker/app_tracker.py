@@ -4,6 +4,9 @@ import win32process
 import psutil
 
 from db import init_db, save_to_db
+from idle import get_idle_seconds
+
+IDLE_THRESHOLD = 60 # секунды простоя после которых не считаем время
 
 def getActiveWindowProcessName():
     try:
@@ -22,10 +25,17 @@ def main():
     check_interval = 1   # как часто проверяем активное окно в секундах
     save_interval = 10  # как часто пишем в базу в секундах
     seconds_since_save = 0
+    
     try:
         while True:
-            app_name = getActiveWindowProcessName()
-            time_per_app[app_name] = time_per_app.get(app_name, 0) + check_interval
+            idle_seconds = get_idle_seconds()
+
+            if idle_seconds < IDLE_THRESHOLD:
+                app_name = getActiveWindowProcessName()
+                time_per_app[app_name] = time_per_app.get(app_name, 0) + check_interval
+            else:
+                print(f"[простой {int(idle_seconds)} сек] время не считается")
+
             time.sleep(check_interval)
 
             seconds_since_save += check_interval
@@ -36,7 +46,7 @@ def main():
                 seconds_since_save = 0
 
     except KeyboardInterrupt:
-        save_to_db(time_per_app)  # сохраняем время которое не успело дойти до 60 сек
+        save_to_db(time_per_app)
         print("\n--- Сессия сохранена в базу данных ---")
 
 

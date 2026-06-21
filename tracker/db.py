@@ -40,3 +40,18 @@ def save_to_db(time_per_app):
 
     conn.commit()
     conn.close()
+
+def get_usage_between(date_from, date_to):
+    """Сумма секунд по каждой программе/сайту за период [date_from, date_to]."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT app_name, SUM(seconds) as total_seconds
+        FROM app_usage
+        WHERE date BETWEEN ? AND ?
+        GROUP BY app_name
+        ORDER BY total_seconds DESC
+    """, (date_from, date_to))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows

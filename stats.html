@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Time Tracker — Статистика</title>
+<style>
+  :root {
+    --bg: #14151a; --card: #1e2026; --border: #2a2d35;
+    --text: #e8e9ed; --muted: #9a9ca5; --accent: #5b8def;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: var(--bg); color: var(--text); padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 16px; }
+  .ranges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .ranges button { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .ranges button.active { background: var(--accent); border-color: var(--accent); color: white; }
+  .custom-range { display: flex; gap: 8px; align-items: center; margin-bottom: 24px; font-size: 13px; color: var(--muted); }
+  .custom-range input { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 6px 8px; border-radius: 6px; }
+  .custom-range button { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+  .bar-row { display: flex; height: 28px; border-radius: 6px; overflow: hidden; margin-bottom: 12px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .app-name { display: flex; align-items: center; gap: 8px; }
+  .app-icon { width: 18px; height: 18px; border-radius: 4px; }
+  select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+  .empty { color: var(--muted); text-align: center; padding: 24px; }
+</style>
+</head>
+<body>
+
+<h1>📊 Статистика активности</h1>
+<div class="ranges" id="ranges"></div>
+<div class="custom-range">
+  <span>Свой период:</span>
+  <input type="date" id="fromInput">
+  <span>—</span>
+  <input type="date" id="toInput">
+  <button onclick="applyCustomRange()">Показать</button>
+</div>
+
+<div class="card">
+  <div class="bar-row" id="barRow"></div>
+  <div class="legend" id="legend"></div>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>Программа / сайт</th><th>Категория</th><th>Время</th></tr></thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+  <div id="emptyMsg" class="empty" style="display:none;">Нет данных за этот период</div>
+</div>
+
+<script>
+const API = "http://localhost:5500";
+const COLORS = ["#5b8def", "#e8a23a", "#e35d5d", "#4cb782", "#9a6ce0", "#5ad1d1"];
+let categoryColors = {};
+let knownCategories = [];
+
+function pad(n) { return n.toString().padStart(2, "0"); }
+function toISO(d) { return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+
+function getRanges() {
+  const today = new Date();
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  const week = new Date(today); week.setDate(today.getDate() - 6);
+  const fourWeeks = new Date(today); fourWeeks.setDate(today.getDate() - 27);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  return [
+    { label: "Сегодня", from: toISO(today), to: toISO(today) },
+    { label: "Вчера", from: toISO(yesterday), to: toISO(yesterday) },
+    { label: "7 дней", from: toISO(week), to: toISO(today) },
+    { label: "4 недели", from: toISO(fourWeeks), to: toISO(today) },
+    { label: "Этот месяц", from: toISO(monthStart), to: toISO(today) },
+  ];
+}
+
+function renderRangeButtons() {
+  const container = document.getElementById("ranges");
+  getRanges().forEach((r, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = r.label;
+    btn.onclick = () => selectRange(r.from, r.to, btn);
+    container.appendChild(btn);
+    if (i === 0) { btn.classList.add("active"); loadStats(r.from, r.to); }
+  });
+}
+
+function selectRange(from, to, btn) {
+  document.querySelectorAll(".ranges button").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("fromInput").value = from;
+  document.getElementById("toInput").value = to;
+  loadStats(from, to);
+}
+
+function applyCustomRange() {
+  const from = document.getElementById("fromInput").value;
+  const to = document.getElementById("toInput").value;
+  if (!from || !to) return;
+  document.querySelectorAll(".ranges button").forEach(b => b.classList.remove("active"));
+  loadStats(from, to);
+}
+
+function formatTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h} ч ${m} мин`;
+  return `${m} мин`;
+}
+
+function colorFor(category) {
+  if (!categoryColors[category]) {
+    const idx = Object.keys(categoryColors).length % COLORS.length;
+    categoryColors[category] = COLORS[idx];
+  }
+  return categoryColors[category];
+}
+
+function iconFor(appName) {
+  if (appName.toLowerCase().endsWith(".exe")) return null;
+  return `https://www.google.com/s2/favicons?domain=${appName}&sz=32`;
+}
+
+async function fetchCategoriesMeta() {
+  const res = await fetch(`${API}/api/categories`);
+  const data = await res.json();
+  knownCategories = data.known_categories;
+}
+
+async function loadStats(from, to) {
+  if (knownCategories.length === 0) await fetchCategoriesMeta();
+  const res = await fetch(`${API}/api/stats?from=${from}&to=${to}`);
+  const data = await res.json();
+  renderBar(data.by_category);
+  renderTable(data.by_app);
+}
+
+function renderBar(byCategory) {
+  const total = Object.values(byCategory).reduce((a, b) => a + b, 0);
+  const barRow = document.getElementById("barRow");
+  const legend = document.getElementById("legend");
+  barRow.innerHTML = ""; legend.innerHTML = "";
+  if (total === 0) { barRow.style.background = "var(--border)"; return; }
+
+  Object.entries(byCategory).sort((a, b) => b[1] - a[1]).forEach(([category, seconds]) => {
+    const pct = (seconds / total) * 100;
+    const seg = document.createElement("div");
+    seg.style.width = pct + "%"; seg.style.background = colorFor(category);
+    seg.title = `${category}: ${formatTime(seconds)}`;
+    barRow.appendChild(seg);
+
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    item.innerHTML = `<span class="legend-dot" style="background:${colorFor(category)}"></span>${category} — ${formatTime(seconds)}`;
+    legend.appendChild(item);
+  });
+}
+
+function renderTable(byApp) {
+  const tbody = document.getElementById("tableBody");
+  const emptyMsg = document.getElementById("emptyMsg");
+  tbody.innerHTML = "";
+  if (byApp.length === 0) { emptyMsg.style.display = "block"; return; }
+  emptyMsg.style.display = "none";
+
+  byApp.forEach(row => {
+    const tr = document.createElement("tr");
+    const iconUrl = iconFor(row.app_name);
+    const iconHtml = iconUrl
+      ? `<img class="app-icon" src="${iconUrl}" onerror="this.style.display='none'">`
+      : `<span style="font-size:16px;">🖥️</span>`;
+
+    const options = [...new Set([...knownCategories, row.category])]
+      .map(c => `<option value="${c}" ${c === row.category ? "selected" : ""}>${c}</option>`)
+      .join("") + `<option value="__new__">+ Новая категория...</option>`;
+
+    tr.innerHTML = `
+      <td><div class="app-name">${iconHtml}<span>${row.app_name}</span></div></td>
+      <td><select onchange="changeCategory('${row.app_name}', this)">${options}</select></td>
+      <td>${formatTime(row.seconds)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function changeCategory(appName, selectEl) {
+  let category = selectEl.value;
+  if (category === "__new__") {
+    const name = prompt("Название новой категории:");
+    if (!name) { selectEl.value = ""; return; }
+    category = name.trim();
+  }
+  await fetch(`${API}/api/categories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ app_name: appName, category: category })
+  });
+  knownCategories = [];
+  loadStats(document.getElementById("fromInput").value, document.getElementById("toInput").value);
+}
+
+renderRangeButtons();
+</script>
+</body>
+</html>

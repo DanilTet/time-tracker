@@ -44,6 +44,30 @@
   select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 6px; font-size: 12px; }
   .empty { color: var(--muted); text-align: center; padding: 24px; }
   .placeholder { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 14px; }
+
+  /* --- тепловая карта --- */
+  .heatmap-hint { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+  .heatmap-months { display: grid; grid-template-columns: repeat(12, 14px); gap: 3px; margin-left: 30px; margin-bottom: 4px; font-size: 11px; color: var(--muted); }
+  .heatmap-wrap { display: flex; gap: 6px; }
+  .heatmap-daylabels { display: grid; grid-template-rows: repeat(7, 14px); gap: 3px; font-size: 10px; color: var(--muted); }
+  .heatmap-daylabels span { height: 14px; line-height: 14px; }
+  .heatmap-grid { position: relative; display: grid; grid-template-rows: repeat(7, 14px); grid-template-columns: repeat(12, 14px); gap: 3px; }
+  .hm-cell { width: 14px; height: 14px; border-radius: 3px; cursor: pointer; }
+  .hm-cell.future { background: transparent; cursor: default; }
+  .hm-level-0 { background: var(--border); }
+  .hm-level-1 { background: rgba(91,141,239,0.3); }
+  .hm-level-2 { background: rgba(91,141,239,0.5); }
+  .hm-level-3 { background: rgba(91,141,239,0.7); }
+  .hm-level-4 { background: #5b8def; }
+  .heatmap-legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); margin-top: 12px; }
+  .heatmap-legend .hm-cell { cursor: default; }
+
+  /* --- часовой таймлайн --- */
+  .hourly-label { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  .hourly-row { display: flex; height: 36px; border-radius: 6px; overflow: hidden; gap: 1px; margin-bottom: 6px; }
+  .hourly-segment { flex: 1; }
+  .hourly-ticks { display: flex; font-size: 10px; color: var(--muted); }
+  .hourly-ticks span { flex: 1; }
 </style>
 </head>
 <body>
@@ -69,6 +93,12 @@
 
   <div class="summary-row" id="summaryRow"></div>
 
+  <div class="card" id="hourlyCard" style="display:none;">
+    <div class="hourly-label" id="hourlyLabel"></div>
+    <div class="hourly-row" id="hourlyRow"></div>
+    <div class="hourly-ticks" id="hourlyTicks"></div>
+  </div>
+
   <div class="card">
     <div class="bar-row" id="barRow"></div>
     <div class="legend" id="legend"></div>
@@ -84,7 +114,23 @@
 </div>
 
 <div id="tab-activity" class="tab-content">
-  <div class="placeholder">🚧 Скоро здесь будет тепловая карта по дням и таймлайн по часам</div>
+  <div class="heatmap-hint">Последние 12 недель. Клик по дню откроет его на вкладке «Обзор» вместе с часами.</div>
+  <div class="card">
+    <div class="heatmap-months" id="heatmapMonths"></div>
+    <div class="heatmap-wrap">
+      <div class="heatmap-daylabels" id="heatmapDayLabels"></div>
+      <div class="heatmap-grid" id="heatmapGrid"></div>
+    </div>
+    <div class="heatmap-legend">
+      <span>Меньше</span>
+      <span class="hm-cell hm-level-0"></span>
+      <span class="hm-cell hm-level-1"></span>
+      <span class="hm-cell hm-level-2"></span>
+      <span class="hm-cell hm-level-3"></span>
+      <span class="hm-cell hm-level-4"></span>
+      <span>Больше</span>
+    </div>
+  </div>
 </div>
 
 <div id="tab-categories" class="tab-content">
@@ -98,6 +144,8 @@
 <script>
 const API = "http://localhost:5500";
 const COLORS = ["#5b8def", "#e8a23a", "#e35d5d", "#4cb782", "#9a6ce0", "#5ad1d1"];
+const HEATMAP_WEEKS = 12;
+const MONTH_NAMES = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
 let categoryColors = {};
 let knownCategories = [];
 
@@ -151,6 +199,14 @@ function applyCustomRange() {
   loadStats(from, to);
 }
 
+function openDayInOverview(dateStr) {
+  switchTab("overview");
+  document.querySelectorAll(".ranges button").forEach(b => b.classList.remove("active"));
+  document.getElementById("fromInput").value = dateStr;
+  document.getElementById("toInput").value = dateStr;
+  loadStats(dateStr, dateStr);
+}
+
 function formatTime(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -184,6 +240,12 @@ async function loadStats(from, to) {
   renderSummary(data.by_app, data.by_category);
   renderBar(data.by_category);
   renderTable(data.by_app);
+
+  if (from === to) {
+    loadHourly(from);
+  } else {
+    document.getElementById("hourlyCard").style.display = "none";
+  }
 }
 
 function renderSummary(byApp, byCategory) {
@@ -276,8 +338,136 @@ async function changeCategory(appName, selectEl) {
   loadStats(document.getElementById("fromInput").value, document.getElementById("toInput").value);
 }
 
+/* ---------- часовой таймлайн ---------- */
+
+function renderHourlyTicks() {
+  const ticks = document.getElementById("hourlyTicks");
+  if (ticks.children.length) return;
+  for (let h = 0; h < 24; h++) {
+    const span = document.createElement("span");
+    if (h % 3 === 0) span.textContent = pad(h) + ":00";
+    ticks.appendChild(span);
+  }
+}
+
+async function loadHourly(dateStr) {
+  const res = await fetch(`${API}/api/hourly?date=${dateStr}`);
+  const data = await res.json();
+  renderHourly(data);
+  document.getElementById("hourlyLabel").textContent = `Часы — ${dateStr}`;
+  document.getElementById("hourlyCard").style.display = "block";
+}
+
+function renderHourly(data) {
+  const row = document.getElementById("hourlyRow");
+  row.innerHTML = "";
+  for (let h = 0; h < 24; h++) {
+    const entry = data[String(h)];
+    const seg = document.createElement("div");
+    seg.className = "hourly-segment";
+    if (entry && entry.total > 0) {
+      let topCat = null, topSec = 0;
+      for (const [cat, sec] of Object.entries(entry.by_category)) {
+        if (sec > topSec) { topCat = cat; topSec = sec; }
+      }
+      seg.style.background = colorFor(topCat);
+      const appsList = Object.entries(entry.by_app)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([n, s]) => `${n}: ${formatTime(s)}`)
+        .join("\n");
+      seg.title = `${pad(h)}:00 — ${formatTime(entry.total)}\n${appsList}`;
+    } else {
+      seg.style.background = "var(--border)";
+    }
+    row.appendChild(seg);
+  }
+}
+
+/* ---------- тепловая карта ---------- */
+
+function mondayOf(d) {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = (day === 0 ? -6 : 1 - day);
+  date.setDate(date.getDate() + diff);
+  return date;
+}
+
+function levelFor(seconds) {
+  if (!seconds || seconds <= 0) return 0;
+  if (seconds <= 3600) return 1;
+  if (seconds <= 3 * 3600) return 2;
+  if (seconds <= 6 * 3600) return 3;
+  return 4;
+}
+
+async function loadHeatmap() {
+  const today = new Date();
+  const gridStart = mondayOf(new Date(today));
+  gridStart.setDate(gridStart.getDate() - (HEATMAP_WEEKS * 7 - 1));
+
+  const from = toISO(gridStart);
+  const to = toISO(today);
+
+  const res = await fetch(`${API}/api/daily?from=${from}&to=${to}`);
+  const data = await res.json();
+  renderHeatmap(gridStart, today, data);
+}
+
+function renderHeatmap(gridStart, today, data) {
+  const grid = document.getElementById("heatmapGrid");
+  const dayLabels = document.getElementById("heatmapDayLabels");
+  const monthsRow = document.getElementById("heatmapMonths");
+  grid.innerHTML = ""; dayLabels.innerHTML = ""; monthsRow.innerHTML = "";
+
+  const dayLabelText = ["Пн", "", "Ср", "", "Пт", "", ""];
+  dayLabelText.forEach(t => {
+    const s = document.createElement("span");
+    s.textContent = t;
+    dayLabels.appendChild(s);
+  });
+
+  let lastMonth = -1;
+  for (let col = 0; col < HEATMAP_WEEKS; col++) {
+    const colDate = new Date(gridStart);
+    colDate.setDate(colDate.getDate() + col * 7);
+    const label = document.createElement("span");
+    if (colDate.getMonth() !== lastMonth) {
+      label.textContent = MONTH_NAMES[colDate.getMonth()];
+      lastMonth = colDate.getMonth();
+    }
+    monthsRow.appendChild(label);
+  }
+
+  for (let i = 0; i < HEATMAP_WEEKS * 7; i++) {
+    const d = new Date(gridStart);
+    d.setDate(d.getDate() + i);
+    const dateStr = toISO(d);
+    const col = Math.floor(i / 7);
+    const row = i % 7;
+
+    const cell = document.createElement("div");
+    cell.style.gridColumnStart = col + 1;
+    cell.style.gridRowStart = row + 1;
+
+    if (d > today) {
+      cell.className = "hm-cell future";
+    } else {
+      const entry = data[dateStr];
+      const total = entry ? entry.total : 0;
+      cell.className = `hm-cell hm-level-${levelFor(total)}`;
+      cell.title = `${dateStr}\n${total > 0 ? formatTime(total) : "нет данных"}`;
+      cell.onclick = () => openDayInOverview(dateStr);
+    }
+    grid.appendChild(cell);
+  }
+}
+
 switchTab('overview');
+renderHourlyTicks();
 renderRangeButtons();
+loadHeatmap();
 </script>
 </body>
 </html>

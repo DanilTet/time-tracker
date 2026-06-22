@@ -1,7 +1,16 @@
 {
   "Code.exe": "Продуктивное",
-  "github.com": "Продуктивное",
+  "github.com": "git",
   "www.youtube.com": "Отвлекающее",
   "chrome.exe": "Без категории",
-  "claude.exe": "AI"
+  "claude.exe": "AI",
+  "Telegram.exe": "Мессенджер",
+  "gemini.google.com": "AI",
+  "miro.com": "Продуктивное",
+  "TD.exe": "мой проектик тавер дефенс",
+  "FortniteClient-Win64-Shipping.exe": "Игры",
+  "notebooklm.google": "Обучение",
+  "notebooklm.google.com": "Обучение",
+  "Discord.exe": "Общение",
+  "mintty.exe": "git"
 }

@@ -2,7 +2,7 @@ import json
 from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from db import get_usage_between
+from db import get_usage_between, get_daily_rows, get_hourly_rows
 from categories import load_categories, set_category, DEFAULT_CATEGORY
 
 PORT = 5500
@@ -52,6 +52,46 @@ class Handler(BaseHTTPRequestHandler):
                 by_category[category] = by_category.get(category, 0) + seconds
 
             self._send_json({"by_app": by_app, "by_category": by_category})
+            return
+
+        if parsed.path == "/api/daily":
+            date_from = params.get("from", [None])[0]
+            date_to = params.get("to", [None])[0]
+            if not date_from or not date_to:
+                self._send_json({"error": "нужны параметры from и to"}, 400)
+                return
+
+            rows = get_daily_rows(date_from, date_to)
+            categories = load_categories()
+
+            by_date = {}
+            for d, app_name, seconds in rows:
+                entry = by_date.setdefault(d, {"total": 0, "by_category": {}})
+                entry["total"] += seconds
+                category = categories.get(app_name, DEFAULT_CATEGORY)
+                entry["by_category"][category] = entry["by_category"].get(category, 0) + seconds
+
+            self._send_json(by_date)
+            return
+
+        if parsed.path == "/api/hourly":
+            date_str = params.get("date", [None])[0]
+            if not date_str:
+                self._send_json({"error": "нужен параметр date"}, 400)
+                return
+
+            rows = get_hourly_rows(date_str)
+            categories = load_categories()
+
+            hours = {}
+            for hour, app_name, seconds in rows:
+                entry = hours.setdefault(str(hour), {"total": 0, "by_category": {}, "by_app": {}})
+                entry["total"] += seconds
+                category = categories.get(app_name, DEFAULT_CATEGORY)
+                entry["by_category"][category] = entry["by_category"].get(category, 0) + seconds
+                entry["by_app"][app_name] = entry["by_app"].get(app_name, 0) + seconds
+
+            self._send_json(hours)
             return
 
         if parsed.path == "/api/categories":

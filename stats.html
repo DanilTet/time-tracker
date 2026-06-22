@@ -45,7 +45,6 @@
   .empty { color: var(--muted); text-align: center; padding: 24px; }
   .placeholder { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 14px; }
 
-  /* --- тепловая карта --- */
   .heatmap-hint { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
   .heatmap-months { display: grid; grid-template-columns: repeat(12, 14px); gap: 3px; margin-left: 30px; margin-bottom: 4px; font-size: 11px; color: var(--muted); }
   .heatmap-wrap { display: flex; gap: 6px; }
@@ -62,12 +61,25 @@
   .heatmap-legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); margin-top: 12px; }
   .heatmap-legend .hm-cell { cursor: default; }
 
-  /* --- часовой таймлайн --- */
   .hourly-label { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
   .hourly-row { display: flex; height: 36px; border-radius: 6px; overflow: hidden; gap: 1px; margin-bottom: 6px; }
   .hourly-segment { flex: 1; }
   .hourly-ticks { display: flex; font-size: 10px; color: var(--muted); }
   .hourly-ticks span { flex: 1; }
+
+  .category-card { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .category-card:last-child { border-bottom: none; }
+  .cat-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .cat-info { min-width: 150px; }
+  .cat-name { font-size: 14px; font-weight: 600; }
+  .cat-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .cat-progress-wrap { flex: 1; min-width: 200px; }
+  .cat-progress-bar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; margin-bottom: 4px; }
+  .cat-progress-fill { height: 100%; border-radius: 4px; }
+  .cat-progress-label { font-size: 12px; color: var(--muted); }
+  .cat-actions { display: flex; gap: 6px; margin-left: auto; }
+  .cat-actions button { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .add-category-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -134,7 +146,8 @@
 </div>
 
 <div id="tab-categories" class="tab-content">
-  <div class="placeholder">🚧 Скоро здесь будет управление категориями и лимитами</div>
+  <div class="card" id="categoriesList"></div>
+  <button class="add-category-btn" onclick="addCategoryPrompt()">+ Добавить категорию</button>
 </div>
 
 <div id="tab-compare" class="tab-content">
@@ -152,6 +165,7 @@ let knownCategories = [];
 function switchTab(name) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab-content").forEach(c => c.classList.toggle("active", c.id === "tab-" + name));
+  if (name === "categories") loadCategoriesTab();
 }
 
 function pad(n) { return n.toString().padStart(2, "0"); }
@@ -338,8 +352,6 @@ async function changeCategory(appName, selectEl) {
   loadStats(document.getElementById("fromInput").value, document.getElementById("toInput").value);
 }
 
-/* ---------- часовой таймлайн ---------- */
-
 function renderHourlyTicks() {
   const ticks = document.getElementById("hourlyTicks");
   if (ticks.children.length) return;
@@ -383,8 +395,6 @@ function renderHourly(data) {
     row.appendChild(seg);
   }
 }
-
-/* ---------- тепловая карта ---------- */
 
 function mondayOf(d) {
   const date = new Date(d);
@@ -462,6 +472,122 @@ function renderHeatmap(gridStart, today, data) {
     }
     grid.appendChild(cell);
   }
+}
+
+async function loadCategoriesTab() {
+  const todayStr = toISO(new Date());
+  const [catRes, limitRes, statsRes] = await Promise.all([
+    fetch(`${API}/api/categories`).then(r => r.json()),
+    fetch(`${API}/api/category-limits`).then(r => r.json()),
+    fetch(`${API}/api/stats?from=${todayStr}&to=${todayStr}`).then(r => r.json())
+  ]);
+  renderCategoriesList(catRes, limitRes, statsRes);
+}
+
+function pluralApps(n) {
+  if (n === 1) return "приложение";
+  if (n >= 2 && n <= 4) return "приложения";
+  return "приложений";
+}
+
+function renderCategoriesList(catRes, limitRes, statsRes) {
+  const mapping = catRes.mapping;
+  const allCats = catRes.known_categories;
+  const limits = limitRes.limits || {};
+  const todayByCategory = statsRes.by_category || {};
+
+  const counts = {};
+  Object.values(mapping).forEach(c => counts[c] = (counts[c] || 0) + 1);
+
+  const container = document.getElementById("categoriesList");
+  container.innerHTML = "";
+
+  allCats.forEach(cat => {
+    const count = counts[cat] || 0;
+    const limitSeconds = (cat in limits) ? limits[cat] : null;
+    const usedSeconds = todayByCategory[cat] || 0;
+    const isDefault = cat === "Без категории";
+
+    let progressHtml = `<div class="cat-meta">Лимит не задан</div>`;
+    if (limitSeconds) {
+      const pct = Math.round((usedSeconds / limitSeconds) * 100);
+      const barColor = pct > 100 ? "#e35d5d" : pct >= 80 ? "#e8a23a" : "#4cb782";
+      const widthPct = Math.min(pct, 100);
+      const warn = pct > 100 ? " ⚠️" : "";
+      progressHtml = `
+        <div class="cat-progress-wrap">
+          <div class="cat-progress-bar"><div class="cat-progress-fill" style="width:${widthPct}%;background:${barColor}"></div></div>
+          <div class="cat-progress-label">Сегодня: ${formatTime(usedSeconds)} / ${formatTime(limitSeconds)}${warn}</div>
+        </div>`;
+    }
+
+    const safeLimit = limitSeconds === null ? "null" : limitSeconds;
+    const row = document.createElement("div");
+    row.className = "category-card";
+    row.innerHTML = `
+      <span class="cat-dot" style="background:${colorFor(cat)}"></span>
+      <div class="cat-info">
+        <div class="cat-name">${cat}</div>
+        <div class="cat-meta">${count} ${pluralApps(count)}</div>
+      </div>
+      ${progressHtml}
+      <div class="cat-actions">
+        <button onclick="setLimitPrompt('${cat}', ${safeLimit})">⏱ Лимит</button>
+        ${!isDefault ? `<button onclick="renameCategoryPrompt('${cat}')">✏️</button><button onclick="deleteCategoryPrompt('${cat}')">🗑</button>` : ""}
+      </div>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function setLimitPrompt(category, currentSeconds) {
+  const currentH = currentSeconds ? (currentSeconds / 3600).toFixed(1) : "";
+  const input = prompt(`Лимит для "${category}" в часах (например 2.5). Оставь пустым, чтобы убрать лимит:`, currentH);
+  if (input === null) return;
+
+  let seconds = null;
+  if (input.trim() !== "") {
+    const hours = parseFloat(input.replace(",", "."));
+    if (!isNaN(hours) && hours > 0) seconds = Math.round(hours * 3600);
+  }
+
+  fetch(`${API}/api/category-limits`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category: category, limit_seconds: seconds })
+  }).then(() => loadCategoriesTab());
+}
+
+function renameCategoryPrompt(oldName) {
+  const newName = prompt(`Новое название для "${oldName}":`, oldName);
+  if (!newName || newName.trim() === "" || newName.trim() === oldName) return;
+
+  fetch(`${API}/api/categories/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ old_name: oldName, new_name: newName.trim() })
+  }).then(() => { knownCategories = []; loadCategoriesTab(); });
+}
+
+function deleteCategoryPrompt(category) {
+  if (!confirm(`Удалить категорию "${category}"? Все привязанные приложения станут "Без категории".`)) return;
+
+  fetch(`${API}/api/categories/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category: category })
+  }).then(() => { knownCategories = []; loadCategoriesTab(); });
+}
+
+function addCategoryPrompt() {
+  const name = prompt("Название новой категории:");
+  if (!name || name.trim() === "") return;
+
+  fetch(`${API}/api/category-limits`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category: name.trim(), limit_seconds: null })
+  }).then(() => { knownCategories = []; loadCategoriesTab(); });
 }
 
 switchTab('overview');

@@ -3,7 +3,10 @@ from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from db import get_usage_between, get_daily_rows, get_hourly_rows
-from categories import load_categories, set_category, DEFAULT_CATEGORY
+from categories import (
+    load_categories, set_category, DEFAULT_CATEGORY,
+    load_limits, set_limit, rename_category, delete_category
+)
 
 PORT = 5500
 browser_status = {"domain": None, "audible": False}
@@ -96,8 +99,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/categories":
             categories = load_categories()
-            known = sorted(set(categories.values()) | {DEFAULT_CATEGORY})
+            limits = load_limits()
+            known = sorted(set(categories.values()) | set(limits.keys()) | {DEFAULT_CATEGORY})
             self._send_json({"mapping": categories, "known_categories": known})
+            return
+
+        if parsed.path == "/api/category-limits":
+            self._send_json({"limits": load_limits()})
             return
 
         self.send_response(404)
@@ -130,6 +138,53 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"ok": True})
                 else:
                     self._send_json({"error": "нужны app_name и category"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 400)
+            return
+
+        if self.path == "/api/category-limits":
+            try:
+                data = json.loads(body)
+                category = data.get("category")
+                limit_seconds = data.get("limit_seconds")
+                if not category:
+                    self._send_json({"error": "нужен category"}, 400)
+                    return
+                set_limit(category, limit_seconds)
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 400)
+            return
+
+        if self.path == "/api/categories/rename":
+            try:
+                data = json.loads(body)
+                old_name = data.get("old_name")
+                new_name = data.get("new_name")
+                if not old_name or not new_name:
+                    self._send_json({"error": "нужны old_name и new_name"}, 400)
+                    return
+                if old_name == DEFAULT_CATEGORY:
+                    self._send_json({"error": "нельзя переименовать системную категорию"}, 400)
+                    return
+                rename_category(old_name, new_name)
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 400)
+            return
+
+        if self.path == "/api/categories/delete":
+            try:
+                data = json.loads(body)
+                category = data.get("category")
+                if not category:
+                    self._send_json({"error": "нужен category"}, 400)
+                    return
+                if category == DEFAULT_CATEGORY:
+                    self._send_json({"error": "нельзя удалить системную категорию"}, 400)
+                    return
+                delete_category(category)
+                self._send_json({"ok": True})
             except Exception as e:
                 self._send_json({"error": str(e)}, 400)
             return
